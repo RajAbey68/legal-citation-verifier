@@ -1,0 +1,5 @@
+# Never commit auth cookies or decoded credentials
+storage_state.json
+*.json.b64
+.env
+.env.*

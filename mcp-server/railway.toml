@@ -1,0 +1,13 @@
+[build]
+builder = "dockerfile"
+dockerfilePath = "mcp-server/Dockerfile"
+
+[deploy]
+healthcheckPath = "/health"
+healthcheckTimeout = 30
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 5
+
+# Environment variables required (set these in Railway dashboard):
+#   NOTEBOOKLM_STORAGE_STATE_B64   base64 of ~/.notebooklm/storage_state.json
+#                                  Run: make encode-auth-clipboard from mcp-server/
