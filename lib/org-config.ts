@@ -109,18 +109,53 @@ export const ORG_CONFIGS: Record<string, OrgConfig> = {
   },
 
   // ---------------------------------------------------------------------------
-  // Finance sector placeholder — wire up when FCA/PRA/Basel III notebook exists
+  // Finance sector — UK Financial Services (FCA / PRA / FSMA / MiFID UK)
+  // Notebook: ba1ce840-b4d7-4cc1-bb38-f71c779f13d9
   // ---------------------------------------------------------------------------
-  // 'finance': {
-  //   label: 'Financial Services (UK)',
-  //   notebookId: 'NOTEBOOK_ID_HERE',
-  //   defaultSources: ['fca', 'pra', 'basel', 'mifid'],
-  //   sourceIds: { fca: [], pra: [], basel: [], mifid: [], _protocol: [] },
-  //   gatekeeperRules: [
-  //     'PRA rules supersede FCA rules for prudential matters.',
-  //     'MiFID II applies to EEA; post-Brexit UK rules differ — always caveat.',
-  //   ],
-  // },
+  'finance-uk': {
+    label: 'UK Financial Services (FCA/PRA)',
+    notebookId: 'ba1ce840-b4d7-4cc1-bb38-f71c779f13d9',
+    defaultSources: ['fca_conduct', 'fca_markets', 'fca_esg', 'pra', 'legislation', 'ico'],
+    sourceIds: {
+      fca_conduct: [
+        '85ce44ce-fde7-407c-80e3-860d9196f96d', // FCA FG22-5 Consumer Duty guidance
+        'ad8ec57a-0471-4065-a03e-ee20686886fe', // SM&CR
+        'c248a500-3374-4435-a512-abfd50ec6386', // Operational resilience
+        'c58fc2d8-fad9-4f52-bc81-56e8fad9adea', // PS23-16
+        'c0bb6feb-9bf5-47d3-afa4-80fa1ab58849', // Market abuse
+        'b0e5030d-236e-4593-bf9d-261c9818775c', // FCA FG21-5
+      ],
+      fca_markets: [
+        '676e8c05-91c9-42ec-8b59-2569587f501e', // MiFID II (UK)
+        '82cfc58d-0b02-42ad-8d94-d91cdb22110d', // PS22-9
+      ],
+      fca_esg: [
+        'becf6562-469f-41a1-b8a7-8fb68ef25aae', // FCA Climate/ESG
+      ],
+      pra: [
+        '2c88de4e-96c3-4615-af7b-08812b6ae661', // BoE Authorisations
+        '65a70578-fbfd-4553-8ce9-4d26de4e027a', // BoE Financial stability
+        '745b4d0c-b650-49b7-924e-a7ad649521fe', // BoE Monetary policy
+      ],
+      legislation: [
+        '0c737d69-5f15-48ba-b0c4-f4ad63bcdd01', // FSMA 2000
+        '9a431e05-f5dc-46e9-b65b-41ca3cf8d772', // FSMA 2023
+      ],
+      ico: [
+        'fc5d614a-3f16-49f5-a085-7fd10a480442', // ICO UK GDPR
+      ],
+      _protocol: [],
+    },
+    gatekeeperRules: [
+      'PRA rules supersede FCA rules for prudential matters — never conflate the two regulators.',
+      'MiFID II (EU) ≠ UK MiFID (post-Brexit) — always specify which regime applies.',
+      'Consumer Duty applies to retail; wholesale market rules differ — flag scope overclaims.',
+      'SM&CR applies to FCA/PRA-authorised firms; not all financial businesses are in scope.',
+      'FCA guidance (FG) ≠ FCA rules (COBS/SYSC) — guidance is not legally binding.',
+      'US SEC/FINRA data must never be applied to UK/FCA regime without explicit caveat.',
+      'Approximations and ROI claims require named FCA/PRA/BoE source or must be deleted.',
+    ],
+  },
 
   // ---------------------------------------------------------------------------
   // Architecture / Built Environment placeholder

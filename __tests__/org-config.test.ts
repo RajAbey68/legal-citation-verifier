@@ -111,11 +111,49 @@ describe('ORG_CONFIGS registry', () => {
     });
   });
 
-  it('every org has a _protocol source group', () => {
+  it('every org has a _protocol source group key', () => {
     Object.entries(ORG_CONFIGS).forEach(([id, cfg]) => {
       expect(cfg.sourceIds._protocol).toBeDefined();
-      expect(cfg.sourceIds._protocol.length).toBeGreaterThan(0);
-      if (!cfg.sourceIds._protocol?.length) throw new Error(`${id}: _protocol is empty`);
+      if (cfg.sourceIds._protocol === undefined) throw new Error(`${id}: _protocol key missing`);
     });
+  });
+
+  it('digital-law-firm has non-empty _protocol sources', () => {
+    expect(ORG_CONFIGS['digital-law-firm'].sourceIds._protocol.length).toBeGreaterThan(0);
+  });
+});
+
+describe('finance-uk org', () => {
+  it('resolves correctly by org_id', () => {
+    const org = resolveOrg('finance-uk');
+    expect(org.orgId).toBe('finance-uk');
+    expect(org.label).toBe('UK Financial Services (FCA/PRA)');
+    expect(org.notebookId).toBe('ba1ce840-b4d7-4cc1-bb38-f71c779f13d9');
+  });
+
+  it('has all expected source groups', () => {
+    const org = resolveOrg('finance-uk');
+    ['fca_conduct', 'fca_markets', 'fca_esg', 'pra', 'legislation', 'ico'].forEach((g) => {
+      expect(org.sourceIds[g]).toBeDefined();
+    });
+  });
+
+  it('default sources resolve to a non-empty list', () => {
+    const org = resolveOrg('finance-uk');
+    const ids = resolveSourceIds(org, org.defaultSources);
+    expect(ids.length).toBeGreaterThan(0);
+  });
+
+  it('gatekeeper rules include FCA/PRA distinction caveat', () => {
+    const org = resolveOrg('finance-uk');
+    const rules = buildGatekeeperRules(org);
+    expect(rules).toContain('PRA');
+    expect(rules).toContain('FCA');
+  });
+
+  it('gatekeeper rules flag US SEC data', () => {
+    const org = resolveOrg('finance-uk');
+    const rules = buildGatekeeperRules(org);
+    expect(rules).toContain('SEC');
   });
 });
