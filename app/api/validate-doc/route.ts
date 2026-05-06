@@ -3,6 +3,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import mammoth from 'mammoth';
 import { resolveOrg, resolveSourceIds } from '../../../lib/org-config';
+import { requireAuth } from '../../../lib/api-auth';
 
 export const maxDuration = 60;
 
@@ -15,6 +16,9 @@ export async function POST(req: NextRequest) {
   if (!file) return NextResponse.json({ error: 'No file provided' }, { status: 400 });
 
   const org = resolveOrg(orgId);
+
+  const authError = await requireAuth(org.orgId, req);
+  if (authError) return authError;
   const sources: string[] = sourcesRaw ? JSON.parse(sourcesRaw) : org.defaultSources;
   const sourceIds = resolveSourceIds(org, sources);
 

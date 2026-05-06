@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { resolveOrg, resolveSourceIds } from '../../../lib/org-config';
+import { requireAuth } from '../../../lib/api-auth';
 
 export const maxDuration = 60;
 
@@ -28,6 +29,9 @@ export async function POST(req: NextRequest) {
   }
 
   const org = resolveOrg(org_id);
+
+  const authError = await requireAuth(org.orgId, req);
+  if (authError) return authError;
   const selectedSources = sources ?? org.defaultSources;
   const sourceIds = resolveSourceIds(org, selectedSources);
 
