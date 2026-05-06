@@ -72,7 +72,7 @@ ${docExcerpt}`;
     arguments: {
       notebook_id: org.notebookId,
       query,
-      source_ids: sourceIds,
+      // source_ids omitted — see verify/route.ts for rationale
     },
   });
 

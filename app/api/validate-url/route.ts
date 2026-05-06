@@ -72,7 +72,7 @@ RISKS: [any regulatory or compliance risks in the document's statements]`;
     arguments: {
       notebook_id: org.notebookId,
       query,
-      source_ids: tempSourceId ? [...sourceIds, tempSourceId] : sourceIds,
+      // source_ids omitted — see verify/route.ts for rationale
     },
   });
 

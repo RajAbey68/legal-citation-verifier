@@ -28,7 +28,7 @@ export async function POST(req: NextRequest) {
     arguments: {
       notebook_id: org.notebookId,
       query: question,
-      source_ids: sourceIds,
+      // source_ids omitted — see verify/route.ts for rationale
     },
   });
 

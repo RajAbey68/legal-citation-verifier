@@ -1,10 +1,10 @@
 FROM python:3.12-slim
 
-# Install uv for fast package management
-RUN pip install uv
+# Install uv and gzip utilities
+RUN pip install uv && apt-get update && apt-get install -y --no-install-recommends gzip && rm -rf /var/lib/apt/lists/*
 
-# Install notebooklm-mcp-cli
-RUN uv tool install notebooklm-mcp-cli
+# Pin to v0.5.27 — matches local installation, uses storage_state.json auth
+RUN uv tool install "notebooklm-mcp-cli==0.5.27"
 
 # Make the CLI binary available on PATH
 ENV PATH="/root/.local/bin:$PATH"

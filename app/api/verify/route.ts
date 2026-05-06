@@ -39,7 +39,8 @@ CITATION: [verbatim quote and source name]
 NOTES: [caveats — flag US-as-UK data, journalism-as-regulation, overclaims, or practitioner-as-regulatory-standard]
 
 Claim: "${claim}"`,
-      source_ids: sourceIds,
+      // source_ids omitted — notebook already contains only curated sources;
+      // passing IDs causes INVALID_ARGUMENT on stateless cloud deployments
     },
   });
 
