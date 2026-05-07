@@ -11,7 +11,8 @@
     "typecheck": "tsc --noEmit",
     "review:batch": "tsx scripts/batch_review.ts",
     "review:chapter": "tsx scripts/batch_review.ts",
-    "research:foreword": "tsx scripts/forward_writer_research.ts"
+    "research:foreword": "tsx scripts/forward_writer_research.ts",
+    "leads:refresh": "tsx scripts/leads_agent.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.92.0",
