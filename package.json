@@ -10,7 +10,8 @@
     "test": "jest",
     "typecheck": "tsc --noEmit",
     "review:batch": "tsx scripts/batch_review.ts",
-    "review:chapter": "tsx scripts/batch_review.ts"
+    "review:chapter": "tsx scripts/batch_review.ts",
+    "research:foreword": "tsx scripts/forward_writer_research.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.92.0",
