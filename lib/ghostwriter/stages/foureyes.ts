@@ -18,8 +18,9 @@ export interface FourEyesResult {
   narrativePct: number;
 }
 
-const COST_IN = (5 / 1_000_000) * 0.79;
-const COST_OUT = (15 / 1_000_000) * 0.79;
+// gpt-5.5 pricing: $15 input / $60 output per 1M tokens → GBP at 0.79
+const COST_IN = (15 / 1_000_000) * 0.79;
+const COST_OUT = (60 / 1_000_000) * 0.79;
 
 /**
  * Estimate the percentage of words in a chapter that are narrative/story content
@@ -181,7 +182,7 @@ export async function runFourEyes(
   const prompt = buildScoringPrompt(chapter, draft, gemini, perplexity, grok, chatgpt);
 
   const response = await client.chat.completions.create({
-    model: 'gpt-4o',
+    model: 'gpt-5.5',
     messages: [{ role: 'user', content: prompt }],
   });
 

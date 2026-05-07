@@ -34,7 +34,7 @@ DRAFT:
 ${draft}`;
 
   const response = await client.chat.completions.create({
-    model: 'grok-3',
+    model: 'grok-4.3',
     messages: [{ role: 'user', content: prompt }],
   });
 

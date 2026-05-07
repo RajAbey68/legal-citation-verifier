@@ -9,8 +9,8 @@ export interface StageResult {
 }
 
 // gpt-4o: $2.50/$10 per 1M tokens → GBP at 0.79
-const COST_IN = (2.50 / 1_000_000) * 0.79;
-const COST_OUT = (10 / 1_000_000) * 0.79;
+const COST_IN = (15 / 1_000_000) * 0.79;
+const COST_OUT = (60 / 1_000_000) * 0.79;
 
 /** Citation depth stage — uses GPT-4o (Gemini free-tier quota exhausted). */
 export async function runGemini(chapter: number, draft: string): Promise<StageResult> {
@@ -32,7 +32,7 @@ DRAFT:
 ${draft}`;
 
   const response = await client.chat.completions.create({
-    model: 'gpt-4o',
+    model: 'gpt-5.5',
     messages: [{ role: 'user', content: prompt }],
   });
 

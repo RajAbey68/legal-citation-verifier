@@ -30,7 +30,7 @@ Also scan the draft for date-sensitive claims:
 ${draft.slice(0, 4000)}`;
 
   const response = await client.chat.completions.create({
-    model: 'sonar-pro',
+    model: 'sonar-reasoning-pro',
     messages: [{ role: 'user', content: prompt }],
   });
 

@@ -2,8 +2,9 @@ import OpenAI from 'openai';
 import { AUTHOR_VOICES, KILL_LIST, TIER_RULES } from './prompts';
 import type { RiskItem } from './stages/foureyes';
 
-const COST_IN = (5 / 1_000_000) * 0.79;
-const COST_OUT = (15 / 1_000_000) * 0.79;
+// gpt-5.5 pricing: $15 input / $60 output per 1M tokens → GBP at 0.79
+const COST_IN = (15 / 1_000_000) * 0.79;
+const COST_OUT = (60 / 1_000_000) * 0.79;
 
 export interface RewriteResult {
   revisedDraft: string;
@@ -128,12 +129,28 @@ export async function rewriteChapter(
   const prompt = buildRewritePrompt(chapter, draft, risk3Items, risk2Items, iteration);
 
   const response = await client.chat.completions.create({
-    model: 'gpt-4o',
+    model: 'gpt-5.5',
     messages: [{ role: 'user', content: prompt }],
     // Long chapters need full context — no max_tokens limit here
   });
 
-  const revisedDraft = response.choices[0].message.content ?? draft;
+  const rawRevised = response.choices[0].message.content ?? '';
+  const originalWordCount = draft.split(/\s+/).length;
+  const revisedWordCount = rawRevised.split(/\s+/).length;
+
+  // Guard: if the rewrite lost more than 20% of word count, the model truncated.
+  // Fall back to original draft to prevent data loss.
+  const revisedDraft =
+    rawRevised.length > 0 && revisedWordCount >= originalWordCount * 0.8
+      ? rawRevised
+      : draft;
+
+  if (revisedWordCount < originalWordCount * 0.8) {
+    console.warn(
+      `  ⚠️  Rewrite truncation detected on Ch${chapter}: original ${originalWordCount} words → revised ${revisedWordCount} words. Keeping original.`
+    );
+  }
+
   const tokensIn = response.usage?.prompt_tokens ?? 0;
   const tokensOut = response.usage?.completion_tokens ?? 0;
   const costGbp = tokensIn * COST_IN + tokensOut * COST_OUT;
