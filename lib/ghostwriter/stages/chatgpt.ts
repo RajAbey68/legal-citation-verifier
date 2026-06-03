@@ -10,7 +10,7 @@ export async function runChatGPT(
   draft: string,
   authorVoice: string
 ): Promise<StageResult> {
-  const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY! });
+  const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY!, timeout: 600_000 });
 
   const prompt = `You are an editorial consistency checker for a Law Society Publishing book.
 Check ONLY: (1) voice compliance, (2) kill-list violations, (3) structural coherence.
@@ -28,7 +28,7 @@ Chapter ${chapter} draft:
 ${draft}`;
 
   const response = await client.chat.completions.create({
-    model: 'gpt-5.5',
+    model: 'gpt-5.1',
     messages: [{ role: 'user', content: prompt }],
   });
 

@@ -31,6 +31,9 @@ import { runPerplexity } from '../lib/ghostwriter/stages/perplexity';
 import { runGrok } from '../lib/ghostwriter/stages/grok';
 import { runChatGPT } from '../lib/ghostwriter/stages/chatgpt';
 import { runFourEyes } from '../lib/ghostwriter/stages/foureyes';
+import { runNotebookLMVerification } from '../lib/ghostwriter/stages/notebooklm';
+import { validateFlags } from '../lib/ghostwriter/stages/flag_validator';
+import { auditReadability } from '../lib/ghostwriter/stages/readability';
 import { rewriteChapter } from '../lib/ghostwriter/rewriter';
 import { AUTHOR_VOICES } from '../lib/ghostwriter/prompts';
 
@@ -72,6 +75,30 @@ function log(msg: string) {
   console.log(`[${ts}] ${msg}`);
 }
 
+/**
+ * Retry wrapper with exponential backoff for rate-limit (429) and transient errors.
+ * Waits 60s → 120s → 240s before giving up.
+ */
+async function withRetry<T>(label: string, fn: () => Promise<T>, maxAttempts = 4): Promise<T> {
+  let delay = 60_000;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      return await fn();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      const is429 = msg.includes('429') || msg.includes('quota') || msg.includes('rate limit');
+      if (attempt < maxAttempts && is429) {
+        log(`  ⏳ ${label} — rate limit hit, retrying in ${delay / 1000}s (attempt ${attempt}/${maxAttempts})`);
+        await new Promise((r) => setTimeout(r, delay));
+        delay *= 2;
+      } else {
+        throw err;
+      }
+    }
+  }
+  throw new Error(`${label} failed after ${maxAttempts} attempts`);
+}
+
 function ensureDir(dir: string) {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 }
@@ -98,47 +125,66 @@ async function processChapter(chapterNum: number): Promise<ChapterResult> {
     iteration++;
     log(`Ch${chapterNum} — iteration ${iteration}/${MAX_ITERATIONS}: running pipeline…`);
 
-    // Stage 1: Evidence hierarchy (GPT-4o, formerly Gemini)
+    // Pre-flight: Readability audit (zero API cost — runs in milliseconds)
+    log(`  Ch${chapterNum} → Pre-flight: Readability Audit`);
+    const readability = auditReadability(chapterNum, currentDraft);
+    log(`  Ch${chapterNum} → Readability: ${readability.overallGrade} | Flesch ${readability.fleschReadingEase} | Grade ${readability.fleschKincaidGrade} | Compulsion ${readability.compulsionScore}`);
+    if (readability.overallGrade === 'FAIL') {
+      log(`  Ch${chapterNum} → ❌ Readability FAIL — LLM pipeline will still run but fix these first:`);
+      readability.blockers.forEach(b => log(`    • ${b}`));
+    }
+    fs.writeFileSync(
+      path.join(REPORTS_DIR, `chapter_${String(chapterNum).padStart(2, '0')}_readability.md`),
+      readability.summary, 'utf-8'
+    );
+
+    // Stage 0: NotebookLM citation pre-verification (ground truth — 184 verified sources)
+    log(`  Ch${chapterNum} → Stage 0: NotebookLM Citation Verification`);
+    const nlmVerification = await withRetry(`Ch${chapterNum} Stage 0`, () => runNotebookLMVerification(chapterNum, currentDraft));
+    totalCostGbp += nlmVerification.stageResult.costGbp;
+
+    // Stage 1: Evidence hierarchy
     log(`  Ch${chapterNum} → Stage 1: Evidence Hierarchy`);
-    const geminiResult = await runGemini(chapterNum, currentDraft);
+    const geminiResult = await withRetry(`Ch${chapterNum} Stage 1`, () => runGemini(chapterNum, currentDraft));
     totalCostGbp += geminiResult.costGbp;
 
     // Stage 2: Currency check (Perplexity)
     log(`  Ch${chapterNum} → Stage 2: Currency Check`);
-    const perplexityResult = await runPerplexity(chapterNum, currentDraft, geminiResult.output);
+    const perplexityResult = await withRetry(`Ch${chapterNum} Stage 2`, () => runPerplexity(chapterNum, currentDraft, geminiResult.output));
     totalCostGbp += perplexityResult.costGbp;
 
     // Stage 3: Critical challenge (Grok)
     log(`  Ch${chapterNum} → Stage 3: Critical Challenge`);
-    const grokResult = await runGrok(
+    const grokResult = await withRetry(`Ch${chapterNum} Stage 3`, () => runGrok(
       chapterNum,
       currentDraft,
       geminiResult.output,
       perplexityResult.output,
-    );
+    ));
     totalCostGbp += grokResult.costGbp;
 
     // Stage 4: Editorial consistency (ChatGPT)
     log(`  Ch${chapterNum} → Stage 4: Editorial Consistency`);
-    const chatgptResult = await runChatGPT(chapterNum, currentDraft, authorVoice);
+    const chatgptResult = await withRetry(`Ch${chapterNum} Stage 4`, () => runChatGPT(chapterNum, currentDraft, authorVoice));
     totalCostGbp += chatgptResult.costGbp;
 
     // Stage 5: Four-Eyes synthesis + risk scoring
     log(`  Ch${chapterNum} → Stage 5: Four-Eyes Risk Scoring`);
-    const { stageResult: fourEyesStage, fourEyes } = await runFourEyes(
+    const { stageResult: fourEyesStage, fourEyes } = await withRetry(`Ch${chapterNum} Stage 5`, () => runFourEyes(
       chapterNum,
       currentDraft,
       geminiResult.output,
       perplexityResult.output,
       grokResult.output,
       chatgptResult.output,
-    );
+      nlmVerification.summary,
+    ));
     totalCostGbp += fourEyesStage.costGbp;
 
     finalMaxRisk = fourEyes.maxRisk;
     finalNarrativePct = fourEyes.narrativePct;
-    finalRisk3Count = fourEyes.risks.filter((r) => r.level === 3).length;
-    finalRisk2Count = fourEyes.risks.filter((r) => r.level === 2).length;
+    finalRisk3Count = fourEyes.risks.filter((r) => r.level >= 4).length;
+    finalRisk2Count = fourEyes.risks.filter((r) => r.level === 3).length;
 
     // Save this iteration's report
     const reportFilename = `chapter_${String(chapterNum).padStart(2, '0')}_review_v${iteration}.md`;
@@ -163,17 +209,17 @@ async function processChapter(chapterNum: number): Promise<ChapterResult> {
     }
 
     // Rewrite to fix RISK-3 items (and attempt RISK-2 where possible)
-    const risk3Items = fourEyes.risks.filter((r) => r.level === 3);
-    const risk2Items = fourEyes.risks.filter((r) => r.level === 2);
+    const risk3Items = fourEyes.risks.filter((r) => r.level >= 4);
+    const risk2Items = fourEyes.risks.filter((r) => r.level === 3);
 
-    log(`  Ch${chapterNum} → Rewriting to fix ${risk3Items.length} RISK-3 and ${risk2Items.length} RISK-2 items…`);
-    const rewriteResult = await rewriteChapter(
+    log(`  Ch${chapterNum} → Rewriting to fix ${risk3Items.length} RISK-4/5 and ${risk2Items.length} RISK-3 items…`);
+    const rewriteResult = await withRetry(`Ch${chapterNum} Rewriter`, () => rewriteChapter(
       chapterNum,
       currentDraft,
       risk3Items,
       risk2Items,
       iteration,
-    );
+    ));
     totalCostGbp += rewriteResult.costGbp;
 
     // Save rewritten chapter in place (preserving original with .v[n].bak)
@@ -182,6 +228,52 @@ async function processChapter(chapterNum: number): Promise<ChapterResult> {
     fs.writeFileSync(filePath, rewriteResult.revisedDraft, 'utf-8');
     currentDraft = rewriteResult.revisedDraft;
     log(`  Ch${chapterNum} → Rewrite saved. Backup: ${path.basename(bakPath)}`);
+  }
+
+  // Stage 6: NotebookLM flag validation + peer LLM challenge
+  // Runs once after all iterations complete — validates every remaining flag
+  log(`  Ch${chapterNum} → Stage 6: Flag Validation (NotebookLM + Peer LLM)`);
+  try {
+    const allRisks = reportPaths.length > 0
+      ? (() => {
+          // Re-read the final report to get the risk items
+          const lastReport = fs.readFileSync(reportPaths[reportPaths.length - 1], 'utf-8');
+          const items: import('../lib/ghostwriter/stages/foureyes').RiskItem[] = [];
+          for (const line of lastReport.split('\n')) {
+            const match = line.match(/RISK-([1-5])\s*\|\s*([^|]+)\|\s*(.+)/i);
+            if (match) {
+              items.push({
+                level: parseInt(match[1], 10) as 1 | 2 | 3 | 4 | 5,
+                category: match[2].trim(),
+                finding: match[3].trim(),
+              });
+            }
+          }
+          return items;
+        })()
+      : [];
+
+    if (allRisks.length > 0) {
+      const validation = await validateFlags(chapterNum, allRisks, currentDraft);
+      const chPad = String(chapterNum).padStart(2, '0');
+      const validationPath = path.join(REPORTS_DIR, `chapter_${chPad}_author_review_pack.md`);
+      fs.writeFileSync(validationPath, validation.markdownReport, 'utf-8');
+
+      // Also copy to Google Drive First Author Review folder
+      const driveDir = path.join(
+        process.env.HOME!,
+        'Library/CloudStorage/GoogleDrive-rajabey68@gmail.com/My Drive/Digital Law firms/First Author Review'
+      );
+      if (fs.existsSync(driveDir)) {
+        fs.writeFileSync(path.join(driveDir, `chapter_${chPad}_author_review_pack.md`), validation.markdownReport, 'utf-8');
+        log(`  Ch${chapterNum} → Copied to Google Drive First Author Review`);
+      }
+
+      log(`  Ch${chapterNum} → Author review pack saved: ${path.basename(validationPath)}`);
+      log(`  Ch${chapterNum} → Risks: ${validation.closedCount} closed | ${validation.actionCount} actions | ${validation.gotchas.length} gotchas`);
+    }
+  } catch (err) {
+    log(`  Ch${chapterNum} → Stage 6 skipped: ${err}`);
   }
 
   return {

@@ -2,9 +2,9 @@ import OpenAI from 'openai';
 import { AUTHOR_VOICES, KILL_LIST, TIER_RULES } from './prompts';
 import type { RiskItem } from './stages/foureyes';
 
-// gpt-5.5 pricing: $15 input / $60 output per 1M tokens → GBP at 0.79
-const COST_IN = (15 / 1_000_000) * 0.79;
-const COST_OUT = (60 / 1_000_000) * 0.79;
+// gpt-5.1 pricing: $3 input / $12 output per 1M tokens → GBP at 0.79
+const COST_IN = (3 / 1_000_000) * 0.79;
+const COST_OUT = (12 / 1_000_000) * 0.79;
 
 export interface RewriteResult {
   revisedDraft: string;
@@ -87,10 +87,17 @@ Preserve all visual aids (ASCII art, tables, flowcharts) exactly as written.
 Preserve all TLDR boxes, Try This Week boxes, Common Mistakes boxes, Two-Path boxes, and Forward Bridge paragraphs.
 Preserve all citation references and Tier 1 source attributions.
 
-BLOCKING ISSUES — RISK-3 (MUST fix all of these):
+RISK SCALE (1–5):
+- RISK-5: Certain SRA/regulatory challenge — publication blocked
+- RISK-4: Arguable — must fix before publication
+- RISK-3: Borderline — rewrite strongly advisable
+- RISK-2: Logged — author awareness only, fix if easy
+- RISK-1: Acceptable — do not change
+
+BLOCKING ISSUES — RISK-4 and RISK-5 (MUST fix all of these):
 ${blockingList || '(none)'}
 
-ADVISORY ISSUES — RISK-2 (fix if possible without introducing new problems):
+ADVISORY ISSUES — RISK-3 (fix these — rewrite strongly advisable):
 ${advisoryList || '(none)'}
 
 ---
@@ -125,13 +132,13 @@ export async function rewriteChapter(
     };
   }
 
-  const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY! });
+  const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY!, timeout: 600_000 });
   const prompt = buildRewritePrompt(chapter, draft, risk3Items, risk2Items, iteration);
 
   const response = await client.chat.completions.create({
-    model: 'gpt-5.5',
+    model: 'gpt-5.1',
     messages: [{ role: 'user', content: prompt }],
-    // Long chapters need full context — no max_tokens limit here
+    max_completion_tokens: 32000, // Full chapter output — gpt-5.1 truncates without this
   });
 
   const rawRevised = response.choices[0].message.content ?? '';

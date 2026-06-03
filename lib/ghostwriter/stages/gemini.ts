@@ -14,7 +14,7 @@ const COST_OUT = (60 / 1_000_000) * 0.79;
 
 /** Citation depth stage — uses GPT-4o (Gemini free-tier quota exhausted). */
 export async function runGemini(chapter: number, draft: string): Promise<StageResult> {
-  const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY! });
+  const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY!, timeout: 600_000 });
 
   const prompt = `You are a research depth checker for a Law Society Publishing book.
 ${TIER_RULES}
@@ -32,7 +32,7 @@ DRAFT:
 ${draft}`;
 
   const response = await client.chat.completions.create({
-    model: 'gpt-5.5',
+    model: 'gpt-5.1',
     messages: [{ role: 'user', content: prompt }],
   });
 

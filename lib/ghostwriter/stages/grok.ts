@@ -13,6 +13,7 @@ export async function runGrok(
   const client = new OpenAI({
     apiKey: process.env.GROK_API_KEY!,
     baseURL: 'https://api.x.ai/v1',
+    timeout: 600_000,
   });
 
   const prompt = `You are a critical reviewer stress-testing a chapter for a Law Society Publishing book.

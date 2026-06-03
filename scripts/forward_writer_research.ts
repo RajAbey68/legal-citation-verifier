@@ -1,18 +1,25 @@
 #!/usr/bin/env npx tsx
 /**
- * Forward Writer Research — LinkedIn via PhantomBuster
- * =====================================================
- * Searches LinkedIn for top 10 ideal foreword candidates for
- * "The Digital Law Firm" (Law Society Publishing, Q4 2026).
+ * Forward Writer Research — LinkedIn Sales Navigator via PhantomBuster
+ * =====================================================================
+ * Finds top foreword writer candidates for "The Digital Law Firm"
+ * (Law Society Publishing, Q4 2026).
+ *
+ * Book authors:
+ *   - Rajiv Abeysinghe  (AI/automation)
+ *   - Darren Sylvester  (practice management)
+ *   - Nick Lockett      (legal tech governance)
+ *   - Sushila Nair      (security/governance)
  *
  * PRE-FLIGHT (one-time setup):
- *   1. Add PHANTOMBUSTER_API_KEY_BOOK to .env.local
+ *   1. Add PHANTOMBUSTER_API_KEY_BOOK  to .env.local
  *   2. Add PHANTOMBUSTER_AGENT_ID_BOOK to .env.local
- *      (LinkedIn Search Export phantom — see plan file for setup steps)
+ *      (LinkedIn Sales Navigator Search Export phantom)
  *
  * Usage:
  *   cd /Users/arajiv/legal-citation-verifier/frontend
- *   npx tsx scripts/forward_writer_research.ts
+ *   npx tsx scripts/forward_writer_research.ts           # live run
+ *   npx tsx scripts/forward_writer_research.ts --dry-run # validate env only
  */
 
 import fs from 'fs';
@@ -21,228 +28,280 @@ import dotenv from 'dotenv';
 
 dotenv.config({ path: path.join(__dirname, '..', '.env.local') });
 
-const PB_API_KEY = process.env.PHANTOMBUSTER_API_KEY_BOOK;
+// ─────────────────────────────────────────────────────────────────────────────
+// Config
+// ─────────────────────────────────────────────────────────────────────────────
+const PB_API_KEY  = process.env.PHANTOMBUSTER_API_KEY_BOOK;
 const PB_AGENT_ID = process.env.PHANTOMBUSTER_AGENT_ID_BOOK;
-const PB_BASE = 'https://api.phantombuster.com/api/v2';
+const PB_BASE     = 'https://api.phantombuster.com/api/v2';
 
-const REPORTS_DIR = path.join(process.env.HOME!, 'Downloads', 'Digital_Law_Firm_Chapters', 'reports');
+const REPORTS_DIR = path.join(
+  process.env.HOME!,
+  'Downloads',
+  'Digital_Law_Firm_Chapters',
+  'reports',
+);
 const GDRIVE_DIR = path.join(
   process.env.HOME!,
   'Library/CloudStorage/GoogleDrive-rajabey68@gmail.com/My Drive/Digital Law firms/First Author Review',
 );
 const OUTPUT_FILENAME = 'forward_writer_candidates.md';
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Search queries — three target pools
-// These are LinkedIn keyword search URLs (standard search, no Sales Nav required)
-// ─────────────────────────────────────────────────────────────────────────────
-const SEARCH_QUERIES = [
-  // Pool A: UK legal technology leaders
-  'https://www.linkedin.com/search/results/people/?keywords=legal%20technology%20director%20UK&origin=GLOBAL_SEARCH_HEADER',
-  // Pool B: Law firm AI / practice management
-  'https://www.linkedin.com/search/results/people/?keywords=law%20firm%20AI%20managing%20partner%20UK&origin=GLOBAL_SEARCH_HEADER',
-  // Pool C: LawTech / Law Society / SRA figures
-  'https://www.linkedin.com/search/results/people/?keywords=lawtech%20UK%20legal%20innovation%20director&origin=GLOBAL_SEARCH_HEADER',
-];
+const DRY_RUN = process.argv.includes('--dry-run');
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Scoring criteria for forward writer suitability
+// Three Sales Navigator search pools
 // ─────────────────────────────────────────────────────────────────────────────
+const SEARCH_URL_A =
+  'https://www.linkedin.com/sales/search/people?query=(recentSearchParam:(id:1,doLogHistory:true),filters:List((type:CURRENT_TITLE,values:List((id:8,text:Chief Executive Officer,selectionType:INCLUDED),(id:6,text:Director,selectionType:INCLUDED),(id:26,text:Managing Partner,selectionType:INCLUDED))),  (type:GEOGRAPHY,values:List((id:101165590,text:United Kingdom,selectionType:INCLUDED))),  (type:INDUSTRY,values:List((id:10,text:Legal Services,selectionType:INCLUDED)))))&keywords=legal+technology+AI';
+
+const SEARCH_URL_B =
+  'https://www.linkedin.com/sales/search/people?query=(filters:List((type:CURRENT_TITLE,values:List((id:8,text:CEO,selectionType:INCLUDED),(id:26,text:Managing Partner,selectionType:INCLUDED),(id:10,text:President,selectionType:INCLUDED))),  (type:GEOGRAPHY,values:List((id:101165590,text:United Kingdom,selectionType:INCLUDED))),  (type:INDUSTRY,values:List((id:10,text:Legal Services,selectionType:INCLUDED)))))&keywords=legal+AI+author';
+
+const SEARCH_URL_C =
+  'https://www.linkedin.com/sales/search/people?query=(filters:List((type:CURRENT_COMPANY,values:List((id:163383,text:The Law Society,selectionType:INCLUDED),(id:2985024,text:Solicitors Regulation Authority,selectionType:INCLUDED),(id:10928987,text:LawTech UK,selectionType:INCLUDED))),  (type:GEOGRAPHY,values:List((id:101165590,text:United Kingdom,selectionType:INCLUDED)))))';
+
+const SEARCH_URLS = [SEARCH_URL_A, SEARCH_URL_B, SEARCH_URL_C];
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PhantomBuster API helpers (patterns from LeadSynch phantomService.ts)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Launch the phantom with all three search URLs joined by newline. */
+async function launchPhantom(): Promise<string> {
+  const res = await fetch(`${PB_BASE}/agents/launch`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Phantombuster-Key': PB_API_KEY!,
+    },
+    body: JSON.stringify({
+      id: PB_AGENT_ID,
+      argument: {
+        identityId: '7009363458112544',
+        searches: SEARCH_URLS.join('\n'),
+        numberOfResultsPerSearch: 50,
+      },
+    }),
+  });
+
+  if (!res.ok) {
+    throw new Error(`PhantomBuster launch failed: ${res.status} ${await res.text()}`);
+  }
+
+  const data = (await res.json()) as { containerId: string };
+  return data.containerId;
+}
+
+/** Poll containers/fetch-output every 15 s, timeout after 10 min. */
+async function pollUntilFinished(containerId: string): Promise<void> {
+  const POLL_INTERVAL_MS = 15_000;
+  const TIMEOUT_MS       = 10 * 60 * 1000;
+  const start            = Date.now();
+
+  while (Date.now() - start < TIMEOUT_MS) {
+    const res = await fetch(`${PB_BASE}/containers/fetch-output?id=${containerId}`, {
+      headers: { 'X-Phantombuster-Key': PB_API_KEY! },
+    });
+
+    if (!res.ok) {
+      throw new Error(`Status poll failed: ${res.status} ${await res.text()}`);
+    }
+
+    const data = (await res.json()) as { status?: string; output?: string };
+    const status = data.status ?? 'unknown';
+    process.stdout.write(`  [poll] status=${status}\n`);
+
+    if (status === 'finished') return;
+
+    if (status === 'failed' || status === 'error') {
+      console.error('  Container output:');
+      console.error(data.output ?? '(no output)');
+      throw new Error(`Phantom execution failed (status=${status})`);
+    }
+
+    await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+  }
+
+  throw new Error('Phantom timed out after 10 minutes');
+}
+
+/** Extract the S3 JSON URL from container output and fetch results. */
+async function fetchResults(containerId: string): Promise<Record<string, unknown>[]> {
+  const res = await fetch(`${PB_BASE}/containers/fetch-output?id=${containerId}`, {
+    headers: { 'X-Phantombuster-Key': PB_API_KEY! },
+  });
+
+  if (!res.ok) {
+    throw new Error(`fetch-output failed: ${res.status}`);
+  }
+
+  const data = (await res.json()) as { output?: string };
+  const output = data.output ?? '';
+
+  // LeadSynch pattern: "JSON saved at https://....json"
+  const s3Match = output.match(/saved at (https:\/\/[^\s\r\n]+\.json)/);
+  if (!s3Match) {
+    console.warn('  No S3 JSON URL found in output. Raw output tail:');
+    console.warn(output.slice(-500));
+    return [];
+  }
+
+  const s3Url = s3Match[1];
+  console.log(`  S3 URL: ${s3Url}`);
+
+  const s3Res = await fetch(s3Url);
+  if (!s3Res.ok) {
+    throw new Error(`S3 fetch failed: ${s3Res.status}`);
+  }
+
+  const json = await s3Res.json();
+  return Array.isArray(json) ? json : [];
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Scoring
+// ─────────────────────────────────────────────────────────────────────────────
+
 interface Candidate {
   name: string;
-  firstName: string;
-  lastName: string;
   title: string;
   company: string;
   linkedinUrl: string;
   location: string;
-  about: string;
   connections: number;
   score: number;
-  scoreBreakdown: string[];
+  whyIdeal: string;
 }
 
-function scoreCandidate(raw: Record<string, string>): Candidate {
-  const name = raw.fullName ?? raw.full_name ?? raw.name ?? `${raw.firstName ?? ''} ${raw.lastName ?? ''}`.trim();
-  const title = (raw.title ?? raw.jobTitle ?? raw.headline ?? '').toLowerCase();
-  const company = raw.company ?? raw.companyName ?? raw.currentCompany ?? '';
-  const location = (raw.location ?? raw.locationName ?? '').toLowerCase();
-  const about = (raw.summary ?? raw.about ?? raw.description ?? '').toLowerCase();
-  const linkedinUrl = raw.linkedInUrl ?? raw.profileUrl ?? raw.url ?? '';
-  const connections = parseInt(raw.connectionsCount ?? raw.connections ?? '0', 10) || 0;
+/** Score a raw profile record according to the spec. */
+function scoreProfile(raw: Record<string, unknown>): Candidate {
+  const str = (v: unknown): string =>
+    typeof v === 'string' ? v : '';
 
-  const breakdown: string[] = [];
+  const name        = str(raw.fullName ?? raw.full_name ?? raw.name ??
+                          ((str(raw.firstName) + ' ' + str(raw.lastName)).trim()));
+  const titleRaw    = str(raw.title ?? raw.jobTitle ?? raw.job_title ?? raw.headline);
+  const titleLower  = titleRaw.toLowerCase();
+  const company     = str(raw.company ?? raw.companyName ?? raw.currentCompany);
+  const compLower   = company.toLowerCase();
+  const linkedinUrl = str(raw.linkedInUrl ?? raw.profileUrl ?? raw.linkedin_url ?? raw.url);
+  const location    = str(raw.location ?? raw.locationName ?? raw.city);
+  const locLower    = location.toLowerCase();
+  const connections = parseInt(str(raw.connectionsCount ?? raw.connections ?? '0'), 10) || 0;
+
   let score = 0;
+  const reasons: string[] = [];
 
-  // UK-based (+2)
-  if (location.includes('united kingdom') || location.includes('england') || location.includes('wales') ||
-      location.includes('london') || location.includes('uk')) {
-    score += 2;
-    breakdown.push('+2 UK-based');
-  }
-
-  // Law Society / SRA / LawTech UK / Legal Geek / CLOC affiliation (+3)
-  const authorityOrgs = ['law society', 'sra ', 'solicitors regulation', 'lawtech', 'legal geek', 'cloc'];
-  if (authorityOrgs.some((o) => company.toLowerCase().includes(o) || title.includes(o) || about.includes(o))) {
+  // +3 if company is Law Society / SRA / LawTech UK / Legal Services Board
+  const authorityOrgs = [
+    'law society',
+    'solicitors regulation authority',
+    'sra',
+    'lawtech uk',
+    'legal services board',
+  ];
+  if (authorityOrgs.some((o) => compLower.includes(o))) {
     score += 3;
-    breakdown.push('+3 Regulatory/LawTech affiliation');
+    reasons.push('Regulatory/LawTech body');
   }
 
-  // Published author or academic (+2)
-  if (about.includes('author') || about.includes('published') || about.includes('wrote') ||
-      title.includes('author') || about.includes('book')) {
+  // +2 if headline/title contains "author" or "published"
+  if (titleLower.includes('author') || titleLower.includes('published')) {
     score += 2;
-    breakdown.push('+2 Published author');
+    reasons.push('Published author');
   }
 
-  // 500+ connections (influence proxy) (+1)
+  // +2 if title contains CEO/President/Chair/Managing Partner
+  if (
+    titleLower.includes('ceo') ||
+    titleLower.includes('chief executive') ||
+    titleLower.includes('president') ||
+    titleLower.includes('chair') ||
+    titleLower.includes('managing partner')
+  ) {
+    score += 2;
+    reasons.push('CEO/President/Chair/Managing Partner');
+  }
+
+  // +1 if title contains Director/Partner
+  if (titleLower.includes('director') || titleLower.includes('partner')) {
+    score += 1;
+    reasons.push('Director/Partner seniority');
+  }
+
+  // +1 if headline mentions AI / legal technology / lawtech
+  if (
+    titleLower.includes('ai') ||
+    titleLower.includes('artificial intelligence') ||
+    titleLower.includes('legal technology') ||
+    titleLower.includes('legal tech') ||
+    titleLower.includes('lawtech')
+  ) {
+    score += 1;
+    reasons.push('AI/legal technology focus');
+  }
+
+  // +1 if connections >= 500
   if (connections >= 500) {
     score += 1;
-    breakdown.push('+1 500+ connections');
+    reasons.push('500+ connections');
   }
 
-  // AI / legal technology keywords in headline (+1)
-  const aiKeywords = ['artificial intelligence', 'legal technology', 'legal tech', ' ai ', 'lawtech', 'legaltech', 'automation'];
-  if (aiKeywords.some((k) => title.includes(k) || about.slice(0, 300).includes(k))) {
-    score += 1;
-    breakdown.push('+1 AI/legal technology focus');
+  // -2 if location not UK
+  const isUk =
+    locLower.includes('united kingdom') ||
+    locLower.includes('england') ||
+    locLower.includes('scotland') ||
+    locLower.includes('wales') ||
+    locLower.includes('northern ireland') ||
+    locLower.includes('london') ||
+    locLower.includes(', uk') ||
+    locLower.endsWith(' uk');
+  if (location && !isUk) {
+    score -= 2;
+    reasons.push('-2 non-UK location');
   }
 
-  // Senior title (+1)
-  const seniorTitles = ['managing partner', 'chief', 'president', 'chair ', 'chairman', 'director', 'ceo', 'cto', 'clo ', 'general counsel', 'head of'];
-  if (seniorTitles.some((t) => title.includes(t))) {
-    score += 1;
-    breakdown.push('+1 Senior title');
-  }
-
-  // Practice management or SRA compliance relevance (+1)
-  const relevanceKeywords = ['practice management', 'compliance', 'governance', 'sra', 'regulation', 'professional services'];
-  if (relevanceKeywords.some((k) => title.includes(k) || about.slice(0, 500).includes(k))) {
-    score += 1;
-    breakdown.push('+1 Practice management/compliance relevance');
-  }
+  const whyIdeal = reasons.length > 0 ? reasons.join('; ') : 'UK legal professional';
 
   return {
     name,
-    firstName: raw.firstName ?? name.split(' ')[0] ?? '',
-    lastName: raw.lastName ?? name.split(' ').slice(1).join(' ') ?? '',
-    title: raw.title ?? raw.jobTitle ?? raw.headline ?? '',
+    title: titleRaw,
     company,
     linkedinUrl,
-    location: raw.location ?? raw.locationName ?? '',
-    about: raw.summary ?? raw.about ?? '',
+    location,
     connections,
     score,
-    scoreBreakdown: breakdown,
+    whyIdeal,
   };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// PhantomBuster API calls (pattern from LeadSynch/server/services/phantomService.ts)
+// Report builder
 // ─────────────────────────────────────────────────────────────────────────────
-async function launchPhantom(searchUrl: string): Promise<string> {
-  const res = await fetch(`${PB_BASE}/agents/launch`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Phantombuster-Key': PB_API_KEY! },
-    body: JSON.stringify({ id: PB_AGENT_ID, argument: { searches: searchUrl, numberOfProfiles: 30 } }),
-  });
-  if (!res.ok) throw new Error(`PhantomBuster launch failed: ${res.status} ${await res.text()}`);
-  const data = await res.json() as { containerId: string };
-  return data.containerId;
-}
-
-async function pollStatus(containerId: string, timeoutMs = 600_000): Promise<void> {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    const res = await fetch(`${PB_BASE}/containers/fetch?id=${containerId}`, {
-      headers: { 'X-Phantombuster-Key': PB_API_KEY! },
-    });
-    if (!res.ok) throw new Error(`Status check failed: ${res.status}`);
-    const data = await res.json() as { status: string };
-    console.log(`    Status: ${data.status}`);
-    if (data.status === 'finished') return;
-    if (data.status === 'failed') throw new Error('Phantom execution failed');
-    await new Promise((r) => setTimeout(r, 30_000));
-  }
-  throw new Error('Phantom timed out after 10 minutes');
-}
-
-async function fetchResults(containerId: string): Promise<Record<string, string>[]> {
-  // Strategy 1: containers/fetch-result-object (direct JSON)
-  const res1 = await fetch(`${PB_BASE}/containers/fetch-result-object?id=${containerId}`, {
-    headers: { 'X-Phantombuster-Key': PB_API_KEY! },
-  });
-  if (res1.ok) {
-    const data = await res1.json() as Record<string, string>[];
-    if (Array.isArray(data) && data.length > 0) return data;
-  }
-
-  // Strategy 2: Extract S3 URL from console output log (LeadSynch pattern)
-  const res2 = await fetch(`${PB_BASE}/containers/fetch-output?id=${containerId}`, {
-    headers: { 'X-Phantombuster-Key': PB_API_KEY! },
-  });
-  if (res2.ok) {
-    const log = await res2.text();
-    const s3Match = log.match(/JSON saved at (https:\/\/[^\s\r\n]+\.json)/);
-    if (s3Match) {
-      const s3Res = await fetch(s3Match[1]);
-      if (s3Res.ok) return await s3Res.json() as Record<string, string>[];
-    }
-  }
-
-  return [];
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Build the output report
-// ─────────────────────────────────────────────────────────────────────────────
-function buildReport(top10: Candidate[]): string {
+function buildReport(candidates: Candidate[]): string {
   const ts = new Date().toISOString().replace('T', ' ').slice(0, 16) + ' UTC';
 
-  const rows = top10
+  const tableRows = candidates
     .map((c, i) => {
-      const why = c.scoreBreakdown.join(', ');
-      const url = c.linkedinUrl ? `[Profile](${c.linkedinUrl})` : '—';
-      return `| ${i + 1} | **${c.name}** | ${c.title} | ${c.company} | ${c.score}/10 | ${url} | ${why} |`;
+      const urlCell = c.linkedinUrl ? `[Profile](${c.linkedinUrl})` : '—';
+      return `| ${i + 1} | ${c.name} | ${c.title} | ${c.company} | ${c.score} | ${urlCell} | ${c.whyIdeal} |`;
     })
     .join('\n');
 
-  const profiles = top10
-    .map((c, i) => {
-      return `### ${i + 1}. ${c.name} (Score: ${c.score}/10)
-
-**Current role:** ${c.title}${c.company ? ` at ${c.company}` : ''}
-**Location:** ${c.location || 'Not specified'}
-**LinkedIn:** ${c.linkedinUrl || 'Not available'}
-**Connections:** ${c.connections >= 500 ? '500+' : c.connections || 'Unknown'}
-
-**Scoring:** ${c.scoreBreakdown.join(' | ')}
-
-**Why ideal for the foreword:**
-${generateWhyText(c)}
-
----`;
-    })
-    .join('\n\n');
-
-  return `# Forward Writer Candidates — The Digital Law Firm
+  return `# Foreword Writer Candidates — The Digital Law Firm
 Generated: ${ts}
 Book: The Digital Law Firm (Law Society Publishing, Q4 2026)
-Authors: Rajiv Abeysinghe, Darren, Nick Lockett, Sushila
+Authors: Rajiv Abeysinghe (AI/automation), Darren Sylvester (practice management), Nick Lockett (legal tech governance), Sushila Nair (security/governance)
 
 ---
 
-## Summary Table — Top 10 Candidates
+## Top 15 Candidates
 
-| Rank | Name | Title | Organisation | Score | LinkedIn | Why Ideal |
-|------|------|-------|-------------|-------|----------|-----------|
-${rows}
-
----
-
-## Detailed Profiles
-
-${profiles}
+| Rank | Name | Title | Organisation | Score | LinkedIn URL | Why ideal |
+|------|------|-------|--------------|-------|-------------|-----------|
+${tableRows}
 
 ---
 
@@ -250,145 +309,126 @@ ${profiles}
 
 | Criterion | Points |
 |-----------|--------|
-| UK-based | +2 |
-| Law Society / SRA / LawTech UK affiliation | +3 |
-| Published author | +2 |
-| 500+ LinkedIn connections | +1 |
-| AI / legal technology focus in headline | +1 |
-| Senior title (Partner, Director, CEO, Chair, President) | +1 |
-| Practice management / SRA compliance relevance | +1 |
-
-**Maximum possible score: 11**
+| Company is Law Society / SRA / LawTech UK / Legal Services Board | +3 |
+| Headline/title contains "author" or "published" | +2 |
+| Title contains CEO / President / Chair / Managing Partner | +2 |
+| Title contains Director / Partner | +1 |
+| Headline mentions AI / legal technology / lawtech | +1 |
+| Connections >= 500 | +1 |
+| Location not UK | -2 |
 
 ---
 
 ## Next Steps
 
 1. Review profiles and confirm top 3 choices with all four authors
-2. Check for any existing relationship with any of the four authors
-3. Draft personalised outreach email (Chapter 12 mentions each author's area — match foreword writer to strongest overlap)
+2. Check for existing relationships with any author before cold outreach
+3. Draft personalised outreach email matching foreword writer to strongest author overlap
 4. Approach via LinkedIn InMail or mutual connection introduction
 
 ---
 
-*Generated by the Digital Law Firm Ghostwriter pipeline — forward_writer_research.ts*
+*Generated by forward_writer_research.ts — Digital Law Firm ghostwriter pipeline*
 `;
-}
-
-function generateWhyText(c: Candidate): string {
-  const lines: string[] = [];
-  if (c.scoreBreakdown.some((s) => s.includes('Regulatory'))) {
-    lines.push('Direct regulatory credibility — their endorsement signals SRA/Law Society alignment to the book\'s primary audience.');
-  }
-  if (c.scoreBreakdown.some((s) => s.includes('Published author'))) {
-    lines.push('Publishing track record — familiar with Law Society Publishing standards and audience expectations.');
-  }
-  if (c.scoreBreakdown.some((s) => s.includes('AI'))) {
-    lines.push('AI/legal technology focus — directly aligned with the book\'s core subject matter.');
-  }
-  if (c.scoreBreakdown.some((s) => s.includes('practice management'))) {
-    lines.push('Practice management experience — speaks to Sarah Mitchell\'s role and the book\'s operational frame.');
-  }
-  if (lines.length === 0) {
-    lines.push('Senior UK legal professional with relevant seniority and audience reach.');
-  }
-  return lines.map((l) => `- ${l}`).join('\n');
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Main
 // ─────────────────────────────────────────────────────────────────────────────
-async function main() {
-  // Pre-flight checks
+async function main(): Promise<void> {
+  console.log('━━━ Forward Writer Research — The Digital Law Firm ━━━━━━━━━━━━');
+
+  // Validate env vars
   if (!PB_API_KEY) {
-    console.error('❌ PHANTOMBUSTER_API_KEY_BOOK not set in .env.local');
-    console.error('   See the plan file for setup instructions.');
+    console.error('ERROR: PHANTOMBUSTER_API_KEY_BOOK is not set.');
+    console.error('  Add it to /Users/arajiv/legal-citation-verifier/frontend/.env.local');
     process.exit(1);
   }
   if (!PB_AGENT_ID) {
-    console.error('❌ PHANTOMBUSTER_AGENT_ID_BOOK not set in .env.local');
-    console.error('   Create a "LinkedIn Search Export" phantom at phantombuster.com and add its ID.');
+    console.error('ERROR: PHANTOMBUSTER_AGENT_ID_BOOK is not set.');
+    console.error('  Create a "LinkedIn Sales Navigator Search Export" phantom at phantombuster.com');
+    console.error('  and add its numeric ID to .env.local');
     process.exit(1);
   }
 
+  if (DRY_RUN) {
+    console.log('Env OK:');
+    console.log(`  PHANTOMBUSTER_API_KEY_BOOK  = ${PB_API_KEY.slice(0, 6)}...`);
+    console.log(`  PHANTOMBUSTER_AGENT_ID_BOOK = ${PB_AGENT_ID}`);
+    console.log(`  Search pools: ${SEARCH_URLS.length}`);
+    console.log('Ready to launch');
+    return;
+  }
+
+  // Ensure output directories exist
   fs.mkdirSync(REPORTS_DIR, { recursive: true });
 
-  console.log('━━━ Forward Writer Research — The Digital Law Firm ━━━━━━━━━━━━');
-  console.log(`Using phantom: ${PB_AGENT_ID}`);
-  console.log(`Running ${SEARCH_QUERIES.length} search queries…\n`);
+  // Launch phantom (single launch, all three URLs joined by newline)
+  console.log(`Launching phantom ${PB_AGENT_ID} with ${SEARCH_URLS.length} search pools…`);
+  const containerId = await launchPhantom();
+  console.log(`Container ID: ${containerId}`);
 
-  const allRaw: Record<string, string>[] = [];
+  // Poll until finished
+  console.log('Polling every 15s (timeout 10 min)…');
+  await pollUntilFinished(containerId);
+  console.log('Phantom finished. Fetching results…');
 
-  for (let i = 0; i < SEARCH_QUERIES.length; i++) {
-    const url = SEARCH_QUERIES[i];
-    console.log(`[${i + 1}/${SEARCH_QUERIES.length}] Launching phantom for: ${url.slice(0, 80)}…`);
+  // Fetch and parse results
+  const rawResults = await fetchResults(containerId);
+  console.log(`Raw profiles received: ${rawResults.length}`);
 
-    try {
-      const containerId = await launchPhantom(url);
-      console.log(`  Container: ${containerId}`);
-      console.log('  Polling for completion (up to 10 min)…');
-      await pollStatus(containerId);
-      console.log('  ✅ Complete — fetching results…');
-      const results = await fetchResults(containerId);
-      console.log(`  Found ${results.length} profiles`);
-      allRaw.push(...results);
-    } catch (err) {
-      console.error(`  ⚠️  Query ${i + 1} failed: ${err}`);
-    }
-
-    // Brief pause between queries to protect LinkedIn session health
-    if (i < SEARCH_QUERIES.length - 1) {
-      console.log('  Waiting 60s before next query (session health)…');
-      await new Promise((r) => setTimeout(r, 60_000));
-    }
-  }
-
-  console.log(`\nTotal raw profiles collected: ${allRaw.length}`);
-
-  if (allRaw.length === 0) {
-    console.error('❌ No profiles returned. Check your LinkedIn session cookie in the phantom settings.');
+  if (rawResults.length === 0) {
+    console.error(
+      'No results returned. Check the LinkedIn session cookie in your phantom settings.',
+    );
     process.exit(1);
   }
 
-  // Score and rank
-  const scored = allRaw
-    .map((r) => scoreCandidate(r))
-    .filter((c) => c.name && c.linkedinUrl) // must have name and URL
-    .sort((a, b) => b.score - a.score);
+  // Score, deduplicate, sort, take top 15
+  const scored = rawResults
+    .map((r) => scoreProfile(r as Record<string, unknown>))
+    .filter((c) => c.name.trim().length > 0);
 
-  // Deduplicate by LinkedIn URL
   const seen = new Set<string>();
   const deduped = scored.filter((c) => {
-    if (seen.has(c.linkedinUrl)) return false;
-    seen.add(c.linkedinUrl);
+    const key = c.linkedinUrl || c.name;
+    if (seen.has(key)) return false;
+    seen.add(key);
     return true;
   });
 
-  const top10 = deduped.slice(0, 10);
-  console.log(`\nTop 10 candidates (from ${deduped.length} unique profiles):`);
-  top10.forEach((c, i) => {
-    console.log(`  ${i + 1}. ${c.name} — ${c.title} at ${c.company} (score: ${c.score})`);
+  deduped.sort((a, b) => b.score - a.score);
+  const top15 = deduped.slice(0, 15);
+
+  // Print table to console
+  console.log('\n┌─ Top 15 Foreword Writer Candidates ───────────────────────────┐');
+  top15.forEach((c, i) => {
+    console.log(`  ${String(i + 1).padStart(2)}. [${String(c.score).padStart(2)}] ${c.name} — ${c.title}`);
+    if (c.company) console.log(`       ${c.company}`);
   });
+  console.log('└────────────────────────────────────────────────────────────────┘\n');
 
-  // Write reports
-  const report = buildReport(top10);
-  const outputPath = path.join(REPORTS_DIR, OUTPUT_FILENAME);
-  fs.writeFileSync(outputPath, report, 'utf-8');
-  console.log(`\n✅ Report saved: ${outputPath}`);
+  // Build and save report
+  const report = buildReport(top15);
 
-  // Copy to Google Drive
+  const localPath = path.join(REPORTS_DIR, OUTPUT_FILENAME);
+  fs.writeFileSync(localPath, report, 'utf-8');
+  console.log(`Report saved: ${localPath}`);
+
+  // Save to Google Drive
   try {
     fs.mkdirSync(GDRIVE_DIR, { recursive: true });
-    fs.copyFileSync(outputPath, path.join(GDRIVE_DIR, OUTPUT_FILENAME));
-    console.log(`✅ Copied to Google Drive: First Author Review/${OUTPUT_FILENAME}`);
-  } catch {
-    console.warn('⚠️  Could not copy to Google Drive (Drive may not be mounted)');
+    const gdrivePath = path.join(GDRIVE_DIR, OUTPUT_FILENAME);
+    fs.writeFileSync(gdrivePath, report, 'utf-8');
+    console.log(`Report saved: ${gdrivePath}`);
+  } catch (err) {
+    console.warn(`Could not write to Google Drive (may not be mounted): ${err}`);
   }
 
-  console.log('\n━━━ Done ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  console.log('\n━━━ Done ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 }
 
 main().catch((err) => {
-  console.error('Fatal error:', err);
+  console.error('Fatal error:', err instanceof Error ? err.message : String(err));
   process.exit(1);
 });

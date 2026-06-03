@@ -1,0 +1,28 @@
+# Stage 6 — Voice Authenticity thresholds
+# ========================================
+# Edit these without touching code. The defaults match the Counter-AI rules
+# in ~/.claude/CLAUDE.md. Reload by re-running the audit script.
+#
+# All checks are deterministic regex/structural — no LLM tokens spent.
+
+repetitiveStartWindow: 3            # flag N adjacent paragraphs starting with same word
+paragraphUniformityWindow: 3        # flag N consecutive paragraphs of similar length
+paragraphUniformityTolerance: 0.20  # ± fraction of mean (0.20 = within 20%)
+
+emDashStormWordWindow: 50           # word window for "storm" detection
+emDashStormThreshold: 2             # dashes in window to count as storm
+emDashPer200WordsMax: 1             # max em-dashes per 200 words
+
+namedSpecificsPer1000WordsMin: 5    # min specific references (name/date/time/£/%) per 1,000 words
+
+# Grade thresholds (computed in code — these are the rules):
+#   FAIL     : 2+ blockers (hard structural failures)
+#   ADVISORY : 1 blocker OR 2+ warnings
+#   PASS     : 0 blockers AND < 2 warnings
+
+# Optional LLM pass — off by default, schedule for off-peak when enabled.
+llm:
+  enabled: false
+  model: gpt-5.1                    # used by auditVoiceAuthenticityWithLLM()
+  cron: "0 3 * * *"                 # 03:00 daily — off-peak rate window
+  samples_dir: ~/code/The-Digital-Law-Firm/author_samples/

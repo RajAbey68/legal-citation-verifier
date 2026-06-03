@@ -12,6 +12,7 @@ export async function runPerplexity(
   const client = new OpenAI({
     apiKey: process.env.PERPLEXITY_API_KEY!,
     baseURL: 'https://api.perplexity.ai',
+    timeout: 600_000,
   });
 
   const prompt = `You are a regulatory currency checker. Use live web search to verify claims from a UK legal book chapter are still accurate as of today.
